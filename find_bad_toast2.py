@@ -31,6 +31,8 @@ upon the performance of plpgsql as a language.
 
 """
 def find_bad_toast_2(connect_string, table, pks):
+    conn = psycopg2.connect(connect_string)
+    
     ids_cur = conn.cursor()
     pk_cols = ', '.join(pks)
     ids_cur.execute('SELECT {p} FROM {table}'.format(p=pk_cols, table=table))
