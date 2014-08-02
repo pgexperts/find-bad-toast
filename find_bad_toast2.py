@@ -1,7 +1,12 @@
 #!/usr/bin/env python
 
 import argparse
+from os import getenv
 import psycopg2
+
+def debug(*args):
+    if getenv('FIND_BAD_TOAST_DEBUG', False):
+        print args
 
 """
 
@@ -40,7 +45,8 @@ def find_bad_toast_2(connect_string, table, pks):
     count = 0
     copy_cur = conn.cursor()
     while True:
-        ids = cur.fetchone()
+        ids = ids_cur.fetchone()
+        print ids
         if not ids:
             break
 
@@ -66,13 +72,13 @@ def main():
     parser = argparse.ArgumentParser(
         description='Find rows in a table that have corrupted TOAST values.'
     )
-    parse.add_Argument('-t', '--table', required=True)
-    parser.addArgument('-p', '--pks', required=True, action='append')
-    parser.addArgument('--connect-string', required=True)
-    args = ArgParser.parse_arguments()
+    parser.add_argument('-t', '--table', required=True)
+    parser.add_argument('-p', '--pk', required=True, action='append')
+    parser.add_argument('--connect-string', required=True)
+    args = parser.parse_args()
     
-    find_bad_toast2(args.connect_string, args.table, args.pks)
+    find_bad_toast_2(args.connect_string, args.table, args.pk)
 
 
-if __name__ = '__main__':
+if __name__ == '__main__':
     main()
