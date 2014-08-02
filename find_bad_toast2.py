@@ -1,19 +1,18 @@
 #!/usr/bin/env python
 
+from __future__ import print_function # You must use Python >= 2.6.
+
 import argparse
-from os import getenv
+import os
 import psycopg2
 
 def debug(*args):
-    if getenv('FIND_BAD_TOAST_DEBUG', False):
-        print args
+    if os.getenv('FIND_BAD_TOAST_DEBUG', False):
+        print(*args)
+
 
 """
-
-"""
-
-"""
-find_bad_toast_2 - *****************
+find_bad_toast - *****************
 
 Scan a PostgreSQL table for rows with corrupted TOAST records.
 
@@ -35,37 +34,48 @@ initial whole-table scan, which is painful for large tables, and b) to improve
 upon the performance of plpgsql as a language.
 
 """
-def find_bad_toast_2(connect_string, table, pks):
+def find_bad_toast(connect_string, table, pks):
     conn = psycopg2.connect(connect_string)
     
     ids_cur = conn.cursor()
     pk_cols = ', '.join(pks)
-    ids_cur.execute('SELECT {p} FROM {table}'.format(p=pk_cols, table=table))
+    ids_query = 'SELECT {p} FROM {table}'.format(p=pk_cols, table=table)
+    debug('Selecting IDs using query "{ids_query}"'.format(ids_query=ids_query))
+    ids_cur.execute(ids_query)
 
     count = 0
     copy_cur = conn.cursor()
     while True:
         ids = ids_cur.fetchone()
-        print ids
         if not ids:
             break
 
+        debug('Examining row with IDs', ids)
+
         count += 1
         if count % 100000 == 0:
-            print '{count} rows inspected'.format(count=count)
+            print('{count} rows inspected'.format(count=count))
 
         try:
-            copy_query = 'COPY (SELECT * FROM {table} WHERE'.format(table=table)
+            copy_query = 'COPY (SELECT * FROM {t} WHERE '.format(t=table)
 
             where_clauses = []
-            for col in pks(): where_clauses += '{col} = ?'.format(col=col)
-            copy_query += ' AND'.join(where_clauses)
+            for col in pks:
+                clause = col + ' = %s'
+                debug('Adding clause "{clause}"'.format(clause=clause))
+                where_clauses.append(clause)
 
-            # copy_cur.execute(copy_query, ids)
-            print copy_query
+            debug('AND_clauses: ', where_clauses)
+            copy_query += ' AND '.join(where_clauses)
+
+            copy_query += ") TO '/tmp/testout'"    
+
+            debug('COPY query:', copy_query)
+            copy_cur.execute(copy_query, ids)
 
         except Exception as e:
-            print str(e)
+            print('Found corruption in the row with PK columns', ids,
+                  "Exception: '{ex}'".format(ex=str(e)))
 
 
 def main():
@@ -77,7 +87,7 @@ def main():
     parser.add_argument('--connect-string', required=True)
     args = parser.parse_args()
     
-    find_bad_toast_2(args.connect_string, args.table, args.pk)
+    find_bad_toast(args.connect_string, args.table, args.pk)
 
 
 if __name__ == '__main__':
