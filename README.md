@@ -10,7 +10,7 @@ You want to scan the table and find which row(s) have the corruption.
 Background
 ----------
 
-See (Josh Berkus's blog post on TOAST corruption)[http://www.databasesoup.com/2014/07/improved-toast-corruption-function.html]. This program is a translation of the plpgsql version, generalizing it to arbitrary multicolumn PKs. Rewriting this in Python also eliminates the need for transactions, which was a crucial performance problem when running the plpgsql version on large tables.
+See [Josh Berkus's blog post on TOAST corruption](http://www.databasesoup.com/2014/07/improved-toast-corruption-function.html). This program is a translation of the plpgsql version, generalizing it to arbitrary multicolumn PKs. Rewriting this in Python also eliminates the need for transactions, which was a crucial performance problem when running the plpgsql version on large tables.
 
 Solution
 --------
