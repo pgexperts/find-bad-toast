@@ -22,62 +22,53 @@ def glob_to_regex(glob) -> str | None:
 
     return regex
 
-def globs_to_regex(globs: List[str]) -> str | None:
+def globs_to_regex(globs: List[str] | None) -> str | None:
     if not globs:
         return None
 
     return '^' + '|'.join([f"({glob_to_regex(glob)})" for glob in globs if glob]) + '$'
 
-def table_globs_to_regexes(full_globs) -> Tuple[str, str] | None:
-    if not full_globs:
-        return None, None
+def match_regex(name, yes_regex: str | None, no_regex: str | None) -> bool:
+    if yes_regex:
+        yes = bool(re.match(yes_regex, name))
+    else:
+        yes = True
 
-    table_globs = []
-    schema_globs = []
+    if no_regex:
+        no = bool(re.match(no_regex, name))
+    else:
+        no = False
 
-    for full_glob in full_globs:
+    return yes and not no
 
-        if '.' in full_glob:
-            (schema_glob, table_glob) = full_glob.split('.')
-        else:
-            (schema_glob, table_glob) = (None, full_glob)
+async def find_all_tables(conn: 'asyncpg.connection.Connection',
+                          include_schemas: List[str] | None=None,
+                          exclude_schemas: List[str] | None=None,
+                          include_tables: List[str] | None=None,
+                          exclude_tables: List[str] | None=None,
+                          ):
+    # Finds all user tables in the database we're connected to, filtering by the provided
+    # globs (which are converted to regexes).
 
-        schema_globs.append(schema_glob)
-        table_globs.append(table_glob)
+    # Returns them as an iteration of (schema_name, table_name) tuples.
 
-    return globs_to_regex(schema_globs), globs_to_regex(table_globs)
-
-def match_regex(name, regex) -> bool:
-    if not regex:
-        return True
-
-    if not name:
-        return True
-
-    return bool(re.match(regex, name))
-
-async def find_all_tables(conn: 'asyncpg.connection.Connection', exclude=None, globs=None):
-    # Finds all user tables in the database we're connected to.
-    # Returns them as an iteration of (schemaname, tablename) tuples.
-
-    (schema_regex, table_regex) = table_globs_to_regexes(globs)
-
-    if exclude is None:
-        exclude = []
-
-    exclude.extend(EXCLUDE_SCHEMAS)
+    schema_yes_regex = globs_to_regex(include_schemas)
+    schema_no_regex = globs_to_regex(exclude_schemas)
+    table_yes_regex = globs_to_regex(include_tables)
+    table_no_regex = globs_to_regex(exclude_tables)
 
     for row in await conn.fetch("""
         SELECT table_schema, table_name
           FROM information_schema.tables
          WHERE NOT(table_schema = ANY($1::varchar[]))
           ORDER BY table_schema, table_name
-        """, exclude):
+        """, EXCLUDE_SCHEMAS):
 
-        table_schema, table_name = row['table_schema'], row['table_name']
+        schema_name, table_name = row['table_schema'], row['table_name']
 
-        if match_regex(table_schema, schema_regex) and match_regex(table_name, table_regex):
-            yield table_schema, table_name
+        if match_regex(schema_name, schema_yes_regex, schema_no_regex) and \
+           match_regex(table_name, table_yes_regex, table_no_regex):
+            yield schema_name, table_name
 
 
 async def find_pk_and_extended(conn: 'asyncpg.connection.Connection', schemaname:str, tablename:str) -> Dict[str, List[str]] | None:
