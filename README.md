@@ -94,5 +94,5 @@ parameter errors).
 
 Written by Christophe Pettus <christophe.pettus@pgexperts.com>. Thanks
 to Josh Berkus for the original blog post that inspired the first
-version of the script, and Quinn Weaver and Lucas Fitti for their
+version of the script, and Quinn Weaver and Lukas Fittl for their
 work on the first version.
