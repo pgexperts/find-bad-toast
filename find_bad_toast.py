@@ -181,7 +181,8 @@ async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str,
 
     return True
 
-async def main(include_schemas: List[str] | None=None,
+async def main(specific_tables: List[str],
+               include_schemas: List[str] | None=None,
                exclude_schemas: List[str] | None=None,
                include_tables: List[str] | None=None,
                exclude_tables: List[str] | None=None,
@@ -207,9 +208,25 @@ async def main(include_schemas: List[str] | None=None,
                                                                          exclude_tables,
                                                                          )]
 
-        if not tables:
-            print("no tables found (did the exclude criteria filter them all out?", file=sys.stderr)
-            return
+        if specific_tables:
+            chosen_tables = []
+            for stable in specific_tables:
+                if '.' in stable:
+                    specific_schema_table = tuple(stable.split('.', 1))
+                else:
+                    specific_schema_table = ('public', stable)
+
+                if specific_schema_table not in tables:
+                    print(f"{stable} not found in database, or filtered out", file=sys.stderr)
+                    continue
+
+                chosen_tables.append(specific_schema_table)
+
+            tables = chosen_tables
+        else:
+            if not tables:
+                print("no tables found (did the exclude criteria filter them all out?", file=sys.stderr)
+                return True
 
         for schema_name, table_name in tables:
             pk_and_extended = await find_pk_and_extended(conn, schema_name, table_name, verbosity=verbosity)
@@ -230,17 +247,19 @@ def entrypoint():
                                      add_help=False,
                                      )
 
+    parser.add_argument('tables', nargs='*', action='extend', default=list())
+
     parser.add_argument("--attribute-mode", help="read each attribute individually (slower, more precise)",
                         action='store_true', default=False)
 
-    parser.add_argument("-t", "--table", help="pattern of table names to include", nargs='*', action='append',
-                        default='')
-    parser.add_argument("-T", "--exclude-table", help="pattern of table names to exclude", nargs='*', action='append',
-                        default='')
-    parser.add_argument("-n", "--schema", help="pattern of schema names to include", nargs='*', action='append',
-                        default='')
-    parser.add_argument("-N", "--exclude-schema", help="pattern of schema names to include", nargs='*', action='append',
-                        default='')
+    parser.add_argument("-t", "--table", help="pattern of table names to include", nargs='*', action='extend',
+                        default=list())
+    parser.add_argument("-T", "--exclude-table", help="pattern of table names to exclude", nargs='*', action='extend',
+                        default=list())
+    parser.add_argument("-n", "--schema", help="pattern of schema names to include", nargs='*', action='extend',
+                        default=list())
+    parser.add_argument("-N", "--exclude-schema", help="pattern of schema names to include", nargs='*', action='extend',
+                        default=list())
 
     parser.add_argument("-d", "--dbname", help="database name or connection string", default='')
     parser.add_argument("-h", "--host", help="database server host address", default='')
@@ -252,6 +271,8 @@ def entrypoint():
     parser.add_argument("-q", "--quiet", help="silence all non-error output", action='store_true', default=False)
 
     args = parser.parse_args()
+
+    specific_tables = args.tables
 
     attribute_mode = args.attribute_mode
 
@@ -281,7 +302,8 @@ def entrypoint():
         db_conn_parameters['username'] = args.username
 
     something_bad = asyncio.run(
-        main(include_schemas=include_schemas,
+        main(specific_tables,
+             include_schemas=include_schemas,
              exclude_schemas=exclude_schemas,
              include_tables=include_tables,
              exclude_tables=exclude_tables,

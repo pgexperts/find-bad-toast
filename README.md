@@ -17,10 +17,18 @@ It has only been tested on Linux.
 ## Usage
 
 ```sh
-./find_bad_toast.py [options]
+./find_bad_toast.py [options] [tables...]
 ```
 
 ### Command-Line Options
+
+The positional arguments are a list of tables to scan. They can be either
+table names without a schema (in which case `public` is assumed), or they
+can be qualified: `myschema.mytable`. If the table cannot be found, a
+warning message is emitted and the table is ignored.
+
+Specific tables mentioned here *are* filtered by the filtering options
+below.
 
 #### DB connection options.
 
@@ -34,8 +42,8 @@ tools:
 * `-U` / `--username` -- The username to use for connection.
 
 The script will not prompt for a password if one is required. The password
-can be specified in a `.pgpass` file, or the account being used can
-bet set up with `peer` authentication if it is local. (Never use `trust`
+can be specified in a `.pgpass` file, or the account being used is
+set up with `peer` authentication if it is local. (Never use `trust`
 authentication!)
 
 #### Table and schema filtering options.
