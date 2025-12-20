@@ -133,6 +133,8 @@ async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str,
             print(f"{schemaname}.{tablename}: {e}", file=sys.stderr)
         return False
 
+    pks = pk_and_extended['primary_key_columns']
+
     if verbosity > 1:
         print(f"{schemaname}.{tablename} starting")
 
