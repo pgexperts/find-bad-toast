@@ -99,8 +99,8 @@ to scan the database using table mode, and then re-scan any problematic tables
 with attribute mode. The script will run through the entire set of tables in 
 attribute mode if desired; this will take a long time.
 
-To scan in attribute mode requires that the table have a primary key; a primary
-key is not required for table mode.
+In attribute model, the table primary key will be used to identify records if
+the table has one. Otherwise, the `ctid` is used.
 
 #### Miscellaneous options.
 

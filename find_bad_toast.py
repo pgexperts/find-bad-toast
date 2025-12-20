@@ -63,6 +63,7 @@ async def find_all_tables(conn: 'asyncpg.connection.Connection',
         SELECT table_schema, table_name
           FROM information_schema.tables
          WHERE NOT(table_schema = ANY($1::varchar[]))
+           AND table_type = 'BASE TABLE'
           ORDER BY table_schema, table_name
         """, EXCLUDE_SCHEMAS):
 
@@ -92,7 +93,7 @@ async def find_pk_and_extended(conn: 'asyncpg.connection.Connection',
     if row['primary_key_columns']:
         result = {'primary_key_columns': row['primary_key_columns']}
     else:
-        result = {'primary_key_columns': []}
+        result = {'primary_key_columns': ['ctid']}
 
     row = await conn.fetchrow("""
         SELECT array_agg(a.attname) as extended_attributes
@@ -132,10 +133,8 @@ async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str,
             print(f"{schemaname}.{tablename}: {e}", file=sys.stderr)
         return False
 
-    pks = pk_and_extended['primary_key_columns']
-    if not pks:
-        print(f"{schemaname}.{tablename} does not have a primary key column, skipping in attribute mode", file=sys.stderr)
-        return True
+    if verbosity > 1:
+        print(f"{schemaname}.{tablename} starting")
 
     attributes = pk_and_extended['extended_attributes']
 
