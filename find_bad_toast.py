@@ -1,7 +1,9 @@
+#!/usr/bin/env python
 from typing import Dict, List, Tuple
 
 import re
 import sys
+import argparse
 
 import asyncio
 import asyncpg
@@ -71,7 +73,10 @@ async def find_all_tables(conn: 'asyncpg.connection.Connection',
             yield schema_name, table_name
 
 
-async def find_pk_and_extended(conn: 'asyncpg.connection.Connection', schemaname:str, tablename:str) -> Dict[str, List[str]] | None:
+async def find_pk_and_extended(conn: 'asyncpg.connection.Connection',
+                               schemaname:str,
+                               tablename:str,
+                               verbosity:int = 1) -> Dict[str, List[str]] | None:
     # For a given table, find its primary key columns, and any columns with
     # storage mode 'extended' (potentially TOASTed).
 
@@ -98,35 +103,43 @@ async def find_pk_and_extended(conn: 'asyncpg.connection.Connection', schemaname
         """, f"{schemaname}.{tablename}")
 
     if not row['extended_attributes']:
-        print(f"{schemaname}.{tablename} does not any extended or external attributes, skipping")
+        if verbosity > 1:
+            print(f"{schemaname}.{tablename} does not any extended or external attributes, skipping")
         return None
 
     result['extended_attributes'] = row['extended_attributes']
 
     return result
 
-async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str, tablename:str, pk_and_extended: Dict[str, List[str]], full_table:bool=False) -> None:
-    if full_table:
-        print(f"{schemaname}.{tablename}: checking {', '.join(pk_and_extended['extended_attributes'])}")
+async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str,
+                      tablename:str,
+                      pk_and_extended: Dict[str, List[str]],
+                      verbosity:int = 1,
+                      attribute_mode:bool=False) -> bool:
 
-        query = f"""COPY ( SELECT {', '.join(pk_and_extended['extended_attributes'])} 
-                           FROM {schemaname}.{tablename}
+
+    if not attribute_mode:
+        if verbosity > 0:
+            print(f"{schemaname}.{tablename}: checking {', '.join(pk_and_extended['extended_attributes'])}")
+
+        query = f"""COPY ( SELECT {', '.join(['"' + attr + '"' for attr in pk_and_extended['extended_attributes']])} 
+                           FROM "{schemaname}"."{tablename}"
                          ) TO '/dev/null'
                     """
         try:
             await conn.execute(query)
         except Exception as e:
             print(f"{schemaname}.{tablename}: {e}", file=sys.stderr)
-        return
+        return False
 
     pks = pk_and_extended['primary_key_columns']
     if not pks:
-        print(f"{schemaname}.{tablename} does not have a primary key column, skipping in attribute mode")
-        return
+        print(f"{schemaname}.{tablename} does not have a primary key column, skipping in attribute mode", file=sys.stderr)
+        return True
 
     attributes = pk_and_extended['extended_attributes']
 
-    where_predicate = ' AND '.join(f'{pk}=${ordinal+1}' for ordinal, pk in enumerate(pks))
+    where_predicate = ' AND '.join(f'"{pk}"=${ordinal+1}' for ordinal, pk in enumerate(pks))
     if where_predicate:
         where_clause = f"WHERE {where_predicate}"
     else:
@@ -134,19 +147,18 @@ async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str, tab
 
     select_list = ', '.join(pks)
 
-
     for attribute in attributes:
         max_size_for_attr = 0
 
-        query = f"""SELECT md5({attribute}::text) as hash, pg_column_size({attribute}) as len
-                           FROM {schemaname}.{tablename}
+        query = f"""SELECT md5("{attribute}"::text) as hash, pg_column_size("{attribute}") as len
+                           FROM "{schemaname}"."{tablename}"
                            {where_clause}
                     """
 
         row_count = 0
 
         for row in await conn.fetch(f"""
-            SELECT {select_list} FROM {schemaname}.{tablename}
+            SELECT {select_list} FROM "{schemaname}"."{tablename}"
             """):
 
             pk_values = [ v for v in row.values() ]
@@ -157,25 +169,122 @@ async def check_table(conn: 'asyncpg.connection.Connection', schemaname:str, tab
                     max_size_for_attr = max(max_size_for_attr, row['len'])
             except Exception as e:
                 print(f"{schemaname}.{tablename}.{attribute} @ {', '.join([pk + '=' + str(pkv) for pk, pkv in zip(pks, pk_values)])}: {e}", file=sys.stderr)
+                return False
 
             row_count += 1
             if (row_count % 10000) == 0:
-                print(f"{schemaname}.{tablename}.{attribute} {row_count} rows checked")
+                if verbosity > 1:
+                    print(f"{schemaname}.{tablename}.{attribute} {row_count} rows checked")
 
-        print(f"{schemaname}.{tablename}.{attribute} {row_count} rows checked, max size={humanize.intword(max_size_for_attr)}")
+        if verbosity > 0:
+            print(f"{schemaname}.{tablename}.{attribute} {row_count} rows checked, max size={humanize.intword(max_size_for_attr)}")
 
-async def main(full_table=False, **db_conn_parameters) -> None:
+    return True
+
+async def main(include_schemas: List[str] | None=None,
+               exclude_schemas: List[str] | None=None,
+               include_tables: List[str] | None=None,
+               exclude_tables: List[str] | None=None,
+               verbosity:int = 1,
+               attribute_mode:bool = False,
+                **db_conn_parameters: Dict[str, str],
+               ) -> bool:
+
     conn = await asyncpg.connect(**db_conn_parameters)
 
-    tables = [(schemaname, tablename) async for (schemaname, tablename) in find_all_tables(conn)]
+    something_bad = False
 
-    for schemaname, tablename in tables:
-        pk_and_extended = await find_pk_and_extended(conn, schemaname, tablename)
-        if not pk_and_extended:
-            continue
+    try:
+        tables = [(schema_name, table_name)
+                  async for (schema_name, table_name) in find_all_tables(conn,
+                                                                         include_schemas,
+                                                                         exclude_schemas,
+                                                                         include_tables,
+                                                                         exclude_tables,
+                                                                         )]
 
-        await check_table(conn, schemaname, tablename, pk_and_extended, full_table=full_table)
+        if not tables:
+            print("no tables found (did the exclude criteria filter them all out?", file=sys.stderr)
+            return
+
+        for schema_name, table_name in tables:
+            pk_and_extended = await find_pk_and_extended(conn, schema_name, table_name, verbosity=verbosity)
+            if not pk_and_extended:
+                continue
+
+            something_bad |= await check_table(conn, schema_name, table_name, pk_and_extended, verbosity=verbosity, attribute_mode=attribute_mode)
+
+    finally:
+        await conn.close()
+
+    return something_bad
+
+def entrypoint():
+    parser = argparse.ArgumentParser(prog="find_bad_toast",
+                                     description="Scan a PostgreSQL database to find corrupted TOAST records",
+                                     epilog="password must be supplied by a .pgpass file, or peer/trust authentication",
+                                     add_help=False,
+                                     )
+
+    parser.add_argument("--attribute-mode", help="read each attribute individually (slower, more precise)",
+                        action='store_true', default=False)
+
+    parser.add_argument("-t", "--table", help="pattern of table names to include", nargs='*', action='append',
+                        default='')
+    parser.add_argument("-T", "--exclude-table", help="pattern of table names to exclude", nargs='*', action='append',
+                        default='')
+    parser.add_argument("-n", "--schema", help="pattern of schema names to include", nargs='*', action='append',
+                        default='')
+    parser.add_argument("-N", "--exclude-schema", help="pattern of schema names to include", nargs='*', action='append',
+                        default='')
+
+    parser.add_argument("-d", "--dbname", help="database name or connection string", default='')
+    parser.add_argument("-h", "--host", help="database server host address", default='')
+    parser.add_argument("-p", "--port", help="database server port address", default='')
+    parser.add_argument("-U", "--username", help="database username", default='')
+
+    parser.add_argument("-v", "--verbosity", help="increase the output detail, up to -vvv", action='count', default=1)
+    parser.add_argument("-q", "--quiet", help="silence all non-error output", action='store_true', default=False)
+
+    args = parser.parse_args()
+
+    attribute_mode = args.attribute_mode
+
+    include_schemas = args.schema
+    exclude_schemas = args.exclude_schema
+    include_tables = args.table
+    exclude_tables = args.exclude_table
+
+    verbosity = args.verbosity
+    if args.quiet:
+        verbosity = 0
+
+    db_conn_parameters = dict()
+
+    if args.dbname:
+        db_conn_parameters['database'] = args.dbname
+
+    if args.host:
+        db_conn_parameters['host'] = args.host
+
+    if args.port:
+        db_conn_parameters['port'] = args.port
+
+    if args.username:
+        db_conn_parameters['username'] = args.username
+
+    something_bad = asyncio.run(
+        main(include_schemas=include_schemas,
+             exclude_schemas=exclude_schemas,
+             include_tables=include_tables,
+             exclude_tables=exclude_tables,
+             verbosity=verbosity,
+             attribute_mode=attribute_mode,
+             **db_conn_parameters))
+
+    if something_bad:
+        exit(1)
 
 if __name__ == '__main__':
+    entrypoint()
 
-    asyncio.run(main(database='df'))
