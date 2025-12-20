@@ -187,10 +187,14 @@ async def main(include_schemas: List[str] | None=None,
                exclude_tables: List[str] | None=None,
                verbosity:int = 1,
                attribute_mode:bool = False,
+               read_only:bool = False,
                 **db_conn_parameters: Dict[str, str],
                ) -> bool:
 
     conn = await asyncpg.connect(**db_conn_parameters)
+
+    if read_only:
+        await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
 
     something_bad = False
 
@@ -243,6 +247,7 @@ def entrypoint():
     parser.add_argument("-p", "--port", help="database server port address", default='')
     parser.add_argument("-U", "--username", help="database username", default='')
 
+    parser.add_argument("-x", "--read-only", help="set the session default to read-only", action='store_true', default=False)
     parser.add_argument("-v", "--verbosity", help="increase the output detail, up to -vvv", action='count', default=1)
     parser.add_argument("-q", "--quiet", help="silence all non-error output", action='store_true', default=False)
 
@@ -258,6 +263,8 @@ def entrypoint():
     verbosity = args.verbosity
     if args.quiet:
         verbosity = 0
+
+    read_only = args.read_only
 
     db_conn_parameters = dict()
 
@@ -280,6 +287,7 @@ def entrypoint():
              exclude_tables=exclude_tables,
              verbosity=verbosity,
              attribute_mode=attribute_mode,
+             read_only=read_only,
              **db_conn_parameters))
 
     if something_bad:
